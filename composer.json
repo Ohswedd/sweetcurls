@@ -1,0 +1,20 @@
+{
+    "name": "ohswedd/sweetcurls",
+    "type": "library",
+    "description": "Support for all asyncrone and syncrone curls call needs with logs and multiple utilities.",
+    "keywords": ["ohswedd","Edoardo","Federici", "curls", "sweetcurls", "curls php", "async curls php", "async curl"],
+    "license": "",
+    "authors": [
+      {
+        "name": "Edoardo Federici",
+        "email": "ohswedd@gmail.com",
+        "role": "Developer"
+      }
+    ],
+    "autoload": {
+      "classmap": ["lib"]
+    },
+    "require": {
+    },
+    "minimum-stability": "dev"
+  }
