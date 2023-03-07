@@ -1,8 +1,8 @@
 <?php 
 
-namespace Ohswedd\Sweetcurls;
+namespace SweetCurls;
 
-class CurlRequest {
+class SweetCurl {
     private $url;
     private $urls;
     private $headers;
