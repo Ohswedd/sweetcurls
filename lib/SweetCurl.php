@@ -14,7 +14,9 @@ class SweetCurl {
     private $successLogPath;
     private $errorLogPath;
     private $response;
+    private $responses;
     private $responseRequired;
+    private $responseFileRequired;
     private $customOptions;
     private $customHeaders;
     private $asyncResponseSave;
@@ -30,6 +32,7 @@ class SweetCurl {
         $this->options = $options;
         $this->responseRequired = $responseRequired;
         $this->logsEnabled = false;
+        $this->responseFileRequired = false;
         $this->uuidLog = uniqid();
     }
 
@@ -41,7 +44,15 @@ class SweetCurl {
         $this->urls = $urls;
     }
 
+    public function getUuid() {
+        return $this->uuidLog;
+    }
+
     public function returnResponse() {
+        return $this->response;
+    }
+
+    public function returnResponses() {
         return $this->response;
     }
 
@@ -85,30 +96,34 @@ class SweetCurl {
         $this->errorLogPath = $path;
     }
 
+    public function enableResponseFile() {
+        $this->responseFileRequired = true;
+    }
+
     public function singleRequest() {
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $this->url);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_HEADER, false);
-
+    
         if ($this->bearerToken) {
             curl_setopt($ch, CURLOPT_HTTPHEADER, array("Authorization: Bearer {$this->bearerToken}"));
         }
-
+    
         if ($this->authorization) {
             curl_setopt($ch, CURLOPT_HTTPHEADER, array("Authorization: {$this->authorization}"));
         }
-
+    
         if ($this->method) {
             curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $this->method);
         }
-
+    
         if ($this->options) {
             foreach ($this->options as $key => $value) {
                 curl_setopt($ch, $key, $value);
             }
         }
-
+    
         if ($this->headers) {
             $headers = array();
             foreach ($this->headers as $key => $value) {
@@ -120,14 +135,24 @@ class SweetCurl {
         $this->response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     
-        curl_close($ch);
-    
-        if ($this->logsEnabled) {
-            $logMessage = "{$this->uuidLog}:Success code:{$httpCode}:{$this->response}";
-            $this->logMessage($logMessage, $this->successLogPath);
+        if (curl_errno($ch)) {
+            // An error occurred
+            $error = curl_error($ch);
+            curl_close($ch);
+            if ($this->logsEnabled) {
+                $logMessage = "|||{$this->uuidLog}:Error code:{$httpCode}:{$error}|||";
+                $this->logMessage($logMessage, $this->errorLogPath);
+            }
+            return $this->responseRequired ? $error : false;
+        } else {
+            // Success
+            curl_close($ch);
+            if ($this->logsEnabled) {
+                $logMessage = "|||{$this->uuidLog}:Success code:{$httpCode}:{$this->response}|||";
+                $this->logMessage($logMessage, $this->successLogPath);
+            }
+            return $this->responseRequired ? $this->response : true;
         }
-    
-        return $this->response;
     }
     
     public function multipleRequests() {
@@ -179,24 +204,20 @@ class SweetCurl {
         foreach ($handles as $ch) {
             $response = curl_multi_getcontent($ch);
             $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    
+        
             if ($this->logsEnabled) {
-                if ($httpCode >= 200 && $httpCode < 300) {
-                    $logMessage = "{$this->uuidLog}:Success code:{$httpCode}:{$response}";
-                    $this->logMessage($logMessage, $this->successLogPath);
-                } else {
-                    $logMessage = "{$this->uuidLog}:Error code:{$httpCode}:{$response}";
-                    $this->logMessage($logMessage, $this->errorLogPath);
-                }
+                $logMessage = "|||{$this->uuidLog}:Success code:{$httpCode}:{$response}|||";
+                $this->logMessage($logMessage, $this->successLogPath);
             }
-    
+        
             $responses[] = $response;
             curl_multi_remove_handle($mh, $ch);
             curl_close($ch);
         }
-    
+        
         curl_multi_close($mh);
-    
+        
+        $this->response = $responses;
         return $responses;
     }
     
@@ -262,10 +283,10 @@ class SweetCurl {
     
         if ($this->logsEnabled) {
             if ($httpCode >= 200 && $httpCode < 300) {
-                $logMessage = "{$uuid}:Success code:{$httpCode}:{$response}";
+                $logMessage = "|||{$uuid}:Success code:{$httpCode}:{$response}|||";
                 $this->logMessage($logMessage, $successLogPath);
             } else {
-                $logMessage = "{$uuid}:Error code:{$httpCode}:{$response}";
+                $logMessage = "|||{$uuid}:Error code:{$httpCode}:{$response}|||";
                 $this->logMessage($logMessage, $errorLogPath);
             }
         }
@@ -365,10 +386,10 @@ class SweetCurl {
     
             if ($this->logsEnabled) {
                 if ($httpCode >= 200 && $httpCode < 300) {
-                    $logMessage = "{$uuid}:Success code:{$httpCode}:{$response}";
+                    $logMessage = "|||{$uuid}:Success code:{$httpCode}:{$response}|||";
                     $this->logMessage($logMessage, $successLogPath);
                 } else {
-                    $logMessage = "{$uuid}:Error code:{$httpCode}:{$response}";
+                    $logMessage = "|||{$uuid}:Error code:{$httpCode}:{$response}|||";
                     $this->logMessage($logMessage, $errorLogPath);
                 }
             }
@@ -391,29 +412,48 @@ class SweetCurl {
     
     public function getUuidLog($uuid, $returnCodeMessage = false) {
         $logPath = $this->successLogPath;
-        if (!$returnCodeMessage) {
+        if ($returnCodeMessage === false) {
             $logPath = $this->errorLogPath;
         }
-    
+        
         if (file_exists($logPath)) {
             $fh = fopen($logPath, 'r');
-            while ($line = fgets($fh)) {
-                if (strpos($line, $uuid) === 0) {
+            if ($fh) {
+                $message = '';
+                while (($line = fgets($fh)) !== false) {
+                    if (strpos($line, $uuid) === false) {
+                        continue;
+                    }
                     $parts = explode(':', $line);
                     if (count($parts) > 3) {
+                        $uuidLog = substr(trim($parts[0]), 3);
                         $code = trim($parts[2]);
-                        $message = trim($parts[3]);
-                        if ($returnCodeMessage) {
-                            return "{$code}:{$message}";
-                        } else {
-                            return $message;
+                        $response = '';
+                        while (($line = fgets($fh)) !== false && strpos($line, '|||') !== 0) {
+                            $response .= $line;
                         }
+                        $response = substr(trim($response), 0, -3);
+                        if ($returnCodeMessage === true) {
+                            return "{$uuidLog}:Success code:{$code}:{$response}";
+                        } elseif ($returnCodeMessage === 'code') {
+                            return $code;
+                        } elseif ($returnCodeMessage === 'response') {
+                            return $response;
+                        } else {
+                            return "{$uuidLog}:Success code:{$code}:{$response}";
+                        }
+                    } else {
+                        $message .= $line;
                     }
                 }
+                fclose($fh);
             }
-            fclose($fh);
         }
-    
+        
+        if ($returnCodeMessage === 'response') {
+            return $message;
+        }
+        
         return false;
     }
     
@@ -426,7 +466,16 @@ class SweetCurl {
     }
     
     private function logMessage($message, $logPath) {
-        $fh = fopen($logPath, 'a');
+        if (!file_exists($logPath)) {
+            // create a new file with the specified permissions
+            $oldUmask = umask(0);
+            $fh = fopen($logPath, 'a');
+            umask($oldUmask);
+            chmod($logPath, 0666);
+        } else {
+            // open the existing file for appending
+            $fh = fopen($logPath, 'a');
+        }
         fwrite($fh, $message . "\n");
         fclose($fh);
     }
